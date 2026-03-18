@@ -593,6 +593,122 @@
   justify-content: flex-end;
 }
 
+/* ── Review screen ───────────────────────── */
+.reviewWrap {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.reviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  gap: 8px;
+}
+
+.reviewTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
+}
+
+.reviewNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.reviewCounter {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: center;
+}
+
+.reviewNavBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.reviewNavBtn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.reviewNavBtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.reviewResultBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 1rem;
+}
+
+.reviewResultBadgeCorrect {
+  background: var(--correct-bg);
+  color: var(--correct);
+}
+
+.reviewResultBadgeWrong {
+  background: var(--wrong-bg);
+  color: var(--wrong);
+}
+
+.reviewDots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 1.25rem;
+}
+
+.reviewDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.reviewDot:hover { transform: scale(1.3); }
+
+.reviewDotCorrect { background: var(--correct); }
+.reviewDotWrong { background: var(--wrong); }
+.reviewDotActive { transform: scale(1.4); outline: 2px solid var(--text-primary); outline-offset: 1px; }
+
+.reviewActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
 /* ── Mobile tweaks ───────────────────────── */
 @media (max-width: 480px) {
   .card { padding: 1.25rem; }

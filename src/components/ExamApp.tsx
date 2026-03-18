@@ -9,7 +9,7 @@ import type {
 } from "@/data/types";
 import styles from "./ExamApp.module.css";
 
-type Screen = "intro" | "scenario" | "question" | "results";
+type Screen = "intro" | "scenario" | "question" | "results" | "review";
 type FilterMode = "all" | Domain;
 
 interface Answer {
@@ -258,6 +258,15 @@ export default function ExamApp() {
             answers={state.answers}
             onRetake={() => startExam(state.filterMode)}
             onHome={reset}
+            onReview={() => setState((s) => ({ ...s, screen: "review" }))}
+          />
+        )}
+        {state.screen === "review" && meta && (
+          <ReviewScreen
+            questions={state.questions}
+            answers={state.answers}
+            domainColors={meta.domainColors}
+            onBack={() => setState((s) => ({ ...s, screen: "results" }))}
           />
         )}
       </main>
@@ -482,16 +491,118 @@ function QuestionScreen({
   );
 }
 
+function ReviewScreen({
+  questions,
+  answers,
+  domainColors,
+  onBack,
+}: {
+  questions: ClientQuestion[];
+  answers: Answer[];
+  domainColors: Record<string, string>;
+  onBack: () => void;
+}) {
+  const [idx, setIdx] = useState(0);
+  const q = questions[idx];
+  const a = answers[idx];
+
+  return (
+    <div className={styles.reviewWrap}>
+      {/* Dot navigation */}
+      <div className={styles.reviewDots}>
+        {answers.map((ans, i) => (
+          <button
+            key={i}
+            className={`${styles.reviewDot} ${ans.correct ? styles.reviewDotCorrect : styles.reviewDotWrong} ${i === idx ? styles.reviewDotActive : ""}`}
+            onClick={() => setIdx(i)}
+            aria-label={`Question ${i + 1}`}
+          />
+        ))}
+      </div>
+
+      <div className={styles.card}>
+        {/* Header */}
+        <div className={styles.reviewHeader}>
+          <div>
+            <span
+              className={`${styles.reviewResultBadge} ${a.correct ? styles.reviewResultBadgeCorrect : styles.reviewResultBadgeWrong}`}
+            >
+              {a.correct ? "✓ Correct" : "✗ Incorrect"}
+            </span>
+          </div>
+          <div className={styles.reviewNav}>
+            <button
+              className={styles.reviewNavBtn}
+              onClick={() => setIdx((i) => i - 1)}
+              disabled={idx === 0}
+            >
+              ‹
+            </button>
+            <span className={styles.reviewCounter}>{idx + 1} / {questions.length}</span>
+            <button
+              className={styles.reviewNavBtn}
+              onClick={() => setIdx((i) => i + 1)}
+              disabled={idx === questions.length - 1}
+            >
+              ›
+            </button>
+          </div>
+        </div>
+
+        {/* Domain */}
+        <div className={styles.metaRow}>
+          <span className={styles.domainTag} style={{ color: domainColors[q.domain] }}>
+            {q.domain}
+          </span>
+          <span className={styles.qCounter}>{q.scenario}</span>
+        </div>
+
+        {/* Question */}
+        <p className={styles.questionText}>{q.q}</p>
+
+        {/* Options */}
+        <div className={styles.options}>
+          {q.opts.map((opt, i) => {
+            let variant = "";
+            if (i === a.correctIndex) variant = styles.optCorrect;
+            else if (i === a.selected && !a.correct) variant = styles.optWrong;
+            return (
+              <div key={i} className={`${styles.option} ${variant}`}>
+                <span className={styles.optLetter}>{["A", "B", "C", "D"][i]}</span>
+                <span className={styles.optText}>{opt}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Explanation */}
+        <div className={`${styles.explanation} ${a.correct ? styles.explanationCorrect : styles.explanationWrong}`}>
+          <span className={styles.explanationLabel}>Explanation</span>
+          <p>{a.explanation}</p>
+        </div>
+
+        <div className={styles.reviewActions}>
+          <button className={styles.ghostBtn} onClick={onBack}>
+            ← Back to results
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ResultsScreen({
   questions,
   answers,
   onRetake,
   onHome,
+  onReview,
 }: {
   questions: ClientQuestion[];
   answers: Answer[];
   onRetake: () => void;
   onHome: () => void;
+  onReview: () => void;
 }) {
   const correct = answers.filter((a) => a.correct).length;
   const total = questions.length;
@@ -570,6 +681,9 @@ function ResultsScreen({
         <div className={styles.resultsActions}>
           <button className={styles.ghostBtn} onClick={onHome}>
             Back to menu
+          </button>
+          <button className={styles.ghostBtn} onClick={onReview}>
+            Review answers
           </button>
           <button className={styles.primaryBtn} onClick={onRetake}>
             Retake exam

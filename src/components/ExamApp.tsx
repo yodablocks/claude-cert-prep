@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import {
-  QUESTIONS,
-  SCENARIOS,
-  DOMAIN_COLORS,
-  type Question,
-  type Domain,
-} from "@/data/questions";
+import { useState, useCallback, useEffect } from "react";
+import type {
+  ClientQuestion,
+  Domain,
+  QuestionsResponse,
+  AnswerResult,
+} from "@/data/types";
 import styles from "./ExamApp.module.css";
 
 type Screen = "intro" | "scenario" | "question" | "results";
@@ -17,16 +16,20 @@ interface Answer {
   questionId: number;
   selected: number;
   correct: boolean;
+  correctIndex: number;
+  explanation: string;
 }
 
 interface ExamState {
   screen: Screen;
   filterMode: FilterMode;
-  questions: Question[];
+  questions: ClientQuestion[];
   currentIndex: number;
   selected: number | null;
   submitted: boolean;
+  submitting: boolean;
   answers: Answer[];
+  answerResult: AnswerResult | null;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -72,6 +75,9 @@ const SCENARIO_TEXT: Record<string, string> = {
 };
 
 export default function ExamApp() {
+  const [meta, setMeta] = useState<QuestionsResponse | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
   const [state, setState] = useState<ExamState>({
     screen: "intro",
     filterMode: "all",
@@ -79,24 +85,39 @@ export default function ExamApp() {
     currentIndex: 0,
     selected: null,
     submitted: false,
+    submitting: false,
     answers: [],
+    answerResult: null,
   });
 
-  const startExam = useCallback((mode: FilterMode) => {
-    const pool =
-      mode === "all"
-        ? QUESTIONS
-        : QUESTIONS.filter((q) => q.domain === mode);
-    setState({
-      screen: "scenario",
-      filterMode: mode,
-      questions: shuffle(pool),
-      currentIndex: 0,
-      selected: null,
-      submitted: false,
-      answers: [],
-    });
+  useEffect(() => {
+    fetch("/api/questions")
+      .then((r) => r.json())
+      .then(setMeta)
+      .catch(() => setLoadError(true));
   }, []);
+
+  const startExam = useCallback(
+    (mode: FilterMode) => {
+      if (!meta) return;
+      const pool =
+        mode === "all"
+          ? meta.questions
+          : meta.questions.filter((q) => q.domain === mode);
+      setState({
+        screen: "scenario",
+        filterMode: mode,
+        questions: shuffle(pool),
+        currentIndex: 0,
+        selected: null,
+        submitted: false,
+        submitting: false,
+        answers: [],
+        answerResult: null,
+      });
+    },
+    [meta]
+  );
 
   const beginSection = useCallback(() => {
     setState((s) => ({ ...s, screen: "question" }));
@@ -104,25 +125,42 @@ export default function ExamApp() {
 
   const selectOption = useCallback(
     (i: number) => {
-      if (state.submitted) return;
+      if (state.submitted || state.submitting) return;
       setState((s) => ({ ...s, selected: i }));
     },
-    [state.submitted]
+    [state.submitted, state.submitting]
   );
 
-  const submitAnswer = useCallback(() => {
-    if (state.selected === null) return;
+  const submitAnswer = useCallback(async () => {
+    if (state.selected === null || state.submitting) return;
     const q = state.questions[state.currentIndex];
-    const correct = state.selected === q.correct;
+
+    setState((s) => ({ ...s, submitting: true }));
+
+    const res = await fetch("/api/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId: q.id, selected: state.selected }),
+    });
+    const result: AnswerResult = await res.json();
+
     setState((s) => ({
       ...s,
+      submitting: false,
       submitted: true,
+      answerResult: result,
       answers: [
         ...s.answers,
-        { questionId: q.id, selected: s.selected!, correct },
+        {
+          questionId: q.id,
+          selected: s.selected!,
+          correct: result.correct,
+          correctIndex: result.correctIndex,
+          explanation: result.explanation,
+        },
       ],
     }));
-  }, [state.selected, state.questions, state.currentIndex]);
+  }, [state.selected, state.questions, state.currentIndex, state.submitting]);
 
   const nextQuestion = useCallback(() => {
     const next = state.currentIndex + 1;
@@ -137,6 +175,8 @@ export default function ExamApp() {
       currentIndex: next,
       selected: null,
       submitted: false,
+      submitting: false,
+      answerResult: null,
       screen: prevScenario !== nextScenario ? "scenario" : "question",
     }));
   }, [state.currentIndex, state.questions]);
@@ -149,7 +189,9 @@ export default function ExamApp() {
       currentIndex: 0,
       selected: null,
       submitted: false,
+      submitting: false,
       answers: [],
+      answerResult: null,
     }));
   }, []);
 
@@ -157,13 +199,22 @@ export default function ExamApp() {
   const correctCount = state.answers.filter((a) => a.correct).length;
   const totalQ = state.questions.length;
 
+  if (loadError) {
+    return (
+      <div className={styles.introShell}>
+        <div className={styles.introContent}>
+          <p style={{ color: "var(--wrong)" }}>Failed to load questions. Please refresh.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (state.screen === "intro") {
-    return <IntroScreen onStart={startExam} />;
+    return <IntroScreen onStart={startExam} loading={!meta} />;
   }
 
   return (
     <div className={styles.shell}>
-      {/* Top bar */}
       <header className={styles.topbar}>
         <button className={styles.logoBtn} onClick={reset}>
           <span className={styles.logoMark}>A</span>
@@ -177,22 +228,31 @@ export default function ExamApp() {
       </header>
 
       <main className={styles.main}>
-        {state.screen === "scenario" && currentQ && (
-          <ScenarioScreen q={currentQ} idx={state.currentIndex} total={totalQ} onBegin={beginSection} />
+        {state.screen === "scenario" && currentQ && meta && (
+          <ScenarioScreen
+            q={currentQ}
+            idx={state.currentIndex}
+            total={totalQ}
+            scenarios={meta.scenarios}
+            onBegin={beginSection}
+          />
         )}
-        {state.screen === "question" && currentQ && (
+        {state.screen === "question" && currentQ && meta && (
           <QuestionScreen
             q={currentQ}
             idx={state.currentIndex}
             total={totalQ}
             selected={state.selected}
             submitted={state.submitted}
+            submitting={state.submitting}
+            answerResult={state.answerResult}
+            domainColors={meta.domainColors}
             onSelect={selectOption}
             onSubmit={submitAnswer}
             onNext={nextQuestion}
           />
         )}
-        {state.screen === "results" && (
+        {state.screen === "results" && meta && (
           <ResultsScreen
             questions={state.questions}
             answers={state.answers}
@@ -205,14 +265,24 @@ export default function ExamApp() {
   );
 }
 
-function IntroScreen({ onStart }: { onStart: (mode: FilterMode) => void }) {
+function IntroScreen({
+  onStart,
+  loading,
+}: {
+  onStart: (mode: FilterMode) => void;
+  loading: boolean;
+}) {
   const [selected, setSelected] = useState<FilterMode>("all");
 
   return (
     <div className={styles.introShell}>
       <div className={styles.introContent}>
         <div className={styles.introBadge}>Beta</div>
-        <h1 className={styles.introTitle}>Claude Architect<br />Certification Prep</h1>
+        <h1 className={styles.introTitle}>
+          Claude Architect
+          <br />
+          Certification Prep
+        </h1>
         <p className={styles.introSubtitle}>
           Practice exam based on the official Foundations certification guide.
           Scenario-based questions across all 5 domains, with explanations after
@@ -239,7 +309,9 @@ function IntroScreen({ onStart }: { onStart: (mode: FilterMode) => void }) {
             {DOMAIN_FILTERS.map((f) => (
               <button
                 key={f.value}
-                className={`${styles.filterChip} ${selected === f.value ? styles.filterChipActive : ""}`}
+                className={`${styles.filterChip} ${
+                  selected === f.value ? styles.filterChipActive : ""
+                }`}
                 onClick={() => setSelected(f.value)}
               >
                 {f.label}
@@ -248,8 +320,12 @@ function IntroScreen({ onStart }: { onStart: (mode: FilterMode) => void }) {
           </div>
         </div>
 
-        <button className={styles.startBtn} onClick={() => onStart(selected)}>
-          Start practice exam
+        <button
+          className={styles.startBtn}
+          onClick={() => onStart(selected)}
+          disabled={loading}
+        >
+          {loading ? "Loading…" : "Start practice exam"}
         </button>
 
         <p className={styles.disclaimer}>
@@ -261,11 +337,19 @@ function IntroScreen({ onStart }: { onStart: (mode: FilterMode) => void }) {
 }
 
 function ScenarioScreen({
-  q, idx, total, onBegin,
+  q,
+  idx,
+  total,
+  scenarios,
+  onBegin,
 }: {
-  q: Question; idx: number; total: number; onBegin: () => void;
+  q: ClientQuestion;
+  idx: number;
+  total: number;
+  scenarios: QuestionsResponse["scenarios"];
+  onBegin: () => void;
 }) {
-  const scenario = SCENARIOS[q.scenario];
+  const scenario = scenarios[q.scenario];
   const color = SCENARIO_COLORS[q.scenarioColor];
   const bg = SCENARIO_BG[q.scenarioColor];
   const text = SCENARIO_TEXT[q.scenarioColor];
@@ -280,7 +364,7 @@ function ScenarioScreen({
       </div>
       <div className={styles.scenarioAccent} style={{ background: color }} />
       <h2 className={styles.scenarioTitle}>{q.scenario}</h2>
-      <p className={styles.scenarioDesc}>{scenario.description}</p>
+      <p className={styles.scenarioDesc}>{scenario?.description}</p>
       <button className={styles.primaryBtn} onClick={onBegin}>
         Begin section
       </button>
@@ -289,34 +373,48 @@ function ScenarioScreen({
 }
 
 function QuestionScreen({
-  q, idx, total, selected, submitted, onSelect, onSubmit, onNext,
+  q,
+  idx,
+  total,
+  selected,
+  submitted,
+  submitting,
+  answerResult,
+  domainColors,
+  onSelect,
+  onSubmit,
+  onNext,
 }: {
-  q: Question;
+  q: ClientQuestion;
   idx: number;
   total: number;
   selected: number | null;
   submitted: boolean;
+  submitting: boolean;
+  answerResult: AnswerResult | null;
+  domainColors: Record<string, string>;
   onSelect: (i: number) => void;
   onSubmit: () => void;
   onNext: () => void;
 }) {
-  const progress = ((idx) / total) * 100;
+  const progress = (idx / total) * 100;
   const isLast = idx === total - 1;
-  const isCorrect = submitted && selected === q.correct;
+  const isCorrect = submitted && answerResult?.correct;
 
   return (
     <div className={styles.questionWrap}>
-      {/* Progress */}
       <div className={styles.progressBar}>
-        <div className={styles.progressFill} style={{ width: `${progress}%` }} />
+        <div
+          className={styles.progressFill}
+          style={{ width: `${progress}%` }}
+        />
       </div>
 
       <div className={styles.card}>
-        {/* Meta row */}
         <div className={styles.metaRow}>
           <span
             className={styles.domainTag}
-            style={{ color: DOMAIN_COLORS[q.domain] }}
+            style={{ color: domainColors[q.domain] }}
           >
             {q.domain}
           </span>
@@ -325,15 +423,13 @@ function QuestionScreen({
           </span>
         </div>
 
-        {/* Question */}
         <p className={styles.questionText}>{q.q}</p>
 
-        {/* Options */}
         <div className={styles.options}>
           {q.opts.map((opt, i) => {
             let variant = "";
-            if (submitted) {
-              if (i === q.correct) variant = styles.optCorrect;
+            if (submitted && answerResult) {
+              if (i === answerResult.correctIndex) variant = styles.optCorrect;
               else if (i === selected) variant = styles.optWrong;
             } else if (i === selected) {
               variant = styles.optSelected;
@@ -353,27 +449,27 @@ function QuestionScreen({
           })}
         </div>
 
-        {/* Explanation */}
-        {submitted && (
+        {submitted && answerResult && (
           <div
-            className={`${styles.explanation} ${isCorrect ? styles.explanationCorrect : styles.explanationWrong}`}
+            className={`${styles.explanation} ${
+              isCorrect ? styles.explanationCorrect : styles.explanationWrong
+            }`}
           >
             <span className={styles.explanationLabel}>
               {isCorrect ? "Correct" : "Incorrect"}
             </span>
-            <p>{q.explanation}</p>
+            <p>{answerResult.explanation}</p>
           </div>
         )}
 
-        {/* Action */}
         <div className={styles.actionRow}>
           {!submitted ? (
             <button
               className={styles.primaryBtn}
               onClick={onSubmit}
-              disabled={selected === null}
+              disabled={selected === null || submitting}
             >
-              Submit answer
+              {submitting ? "Checking…" : "Submit answer"}
             </button>
           ) : (
             <button className={styles.primaryBtn} onClick={onNext}>
@@ -387,9 +483,12 @@ function QuestionScreen({
 }
 
 function ResultsScreen({
-  questions, answers, onRetake, onHome,
+  questions,
+  answers,
+  onRetake,
+  onHome,
 }: {
-  questions: Question[];
+  questions: ClientQuestion[];
   answers: Answer[];
   onRetake: () => void;
   onHome: () => void;
@@ -400,7 +499,6 @@ function ResultsScreen({
   const scaledScore = Math.round(100 + (correct / total) * 900);
   const passed = scaledScore >= 720;
 
-  // Domain breakdown
   const domainMap: Record<string, { correct: number; total: number }> = {};
   questions.forEach((q, i) => {
     if (!domainMap[q.domain]) domainMap[q.domain] = { correct: 0, total: 0 };
@@ -414,7 +512,9 @@ function ResultsScreen({
         <div className={styles.resultsMeta}>
           <div
             className={styles.scoreRing}
-            style={{ borderColor: passed ? "var(--correct)" : "var(--wrong)" }}
+            style={{
+              borderColor: passed ? "var(--correct)" : "var(--wrong)",
+            }}
           >
             <span
               className={styles.scoreNum}
@@ -430,19 +530,20 @@ function ResultsScreen({
             </h2>
             <p className={styles.resultSubtitle}>
               {correct}/{total} correct · {pct}% accuracy ·{" "}
-              <span style={{ color: passed ? "var(--correct)" : "var(--wrong)" }}>
+              <span
+                style={{ color: passed ? "var(--correct)" : "var(--wrong)" }}
+              >
                 {passed ? "Pass" : "Fail"} (720 to pass)
               </span>
             </p>
           </div>
         </div>
 
-        {/* Domain breakdown */}
         <div className={styles.domainBreakdown}>
           <p className={styles.breakdownLabel}>By domain</p>
           {Object.entries(domainMap).map(([domain, data]) => {
-            const d = data as { correct: number; total: number };
-            const dpct = d.total > 0 ? Math.round((d.correct / d.total) * 100) : 0;
+            const dpct =
+              data.total > 0 ? Math.round((data.correct / data.total) * 100) : 0;
             const barColor =
               dpct >= 70
                 ? "var(--correct)"
@@ -459,7 +560,7 @@ function ResultsScreen({
                   />
                 </div>
                 <span className={styles.domainScore}>
-                  {d.correct}/{d.total}
+                  {data.correct}/{data.total}
                 </span>
               </div>
             );
